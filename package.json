@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
-    "check": "node --check server.js && node --check src/main.js && node --check src/game/Game.js && node --check src/game/SceneManager.js && node --check src/scenes/ArenaScene.js && node --check src/entities/Entities.js && node --check src/systems/Systems.js && node --check src/data/config.js && node --check src/utils/math.js"
+    "dev": "C:\\Progra~1\\nodejs\\node.exe server.js",
+    "start": "C:\\Progra~1\\nodejs\\node.exe server.js",
+    "check": "C:\\Progra~1\\nodejs\\node.exe --check server.js && C:\\Progra~1\\nodejs\\node.exe --check src/main.js && C:\\Progra~1\\nodejs\\node.exe --check src/game/Game.js && C:\\Progra~1\\nodejs\\node.exe --check src/game/SceneManager.js && C:\\Progra~1\\nodejs\\node.exe --check src/scenes/ArenaScene.js && C:\\Progra~1\\nodejs\\node.exe --check src/entities/Entities.js && C:\\Progra~1\\nodejs\\node.exe --check src/systems/Systems.js && C:\\Progra~1\\nodejs\\node.exe --check src/systems/AssetManager.js && C:\\Progra~1\\nodejs\\node.exe --check src/systems/MetaProgression.js && C:\\Progra~1\\nodejs\\node.exe --check src/renderers/EntityRenderer.js && C:\\Progra~1\\nodejs\\node.exe --check src/data/config.js && C:\\Progra~1\\nodejs\\node.exe --check src/data/balance.js && C:\\Progra~1\\nodejs\\node.exe --check src/data/visuals.js && C:\\Progra~1\\nodejs\\node.exe --check src/utils/math.js"
   }
 }

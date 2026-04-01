@@ -1,26 +1,36 @@
-import { enemies, weapons } from "../data/config.js";
+import { balance } from "../data/balance.js";
+import { enemies, timedBuffPool, weapons } from "../data/config.js";
 import { Enemy, Pickup, Player, Projectile } from "../entities/Entities.js";
 import { CollisionSystem, SpawnSystem, UpgradeSystem } from "../systems/Systems.js";
-import { angleTo, clamp, distance, fromAngle, normalize, randomRange, TAU } from "../utils/math.js";
+import { angleTo, clamp, distance, formatTime, fromAngle, normalize, randomRange, TAU } from "../utils/math.js";
 
 export class ArenaScene {
-  constructor(game, character) {
+  constructor(game, character, metaBonuses = []) {
     this.game = game;
     this.character = character;
-    this.player = new Player(character);
+    this.player = new Player(character, metaBonuses);
+    this.player.xpMultiplier *= balance.player.baseXpMultiplier;
+    this.player.openingShield = balance.player.openingShieldSeconds;
     this.enemies = [];
     this.projectiles = [];
     this.pickups = [];
+    this.particles = [];
+    this.floatingTexts = [];
     this.enemyIdCounter = 1;
     this.elapsed = 0;
     this.state = "running";
     this.pendingChoices = [];
+    this.rewardChoices = [];
     this.cameraShake = 0;
     this.spawnSystem = new SpawnSystem();
     this.collisionSystem = new CollisionSystem();
     this.upgradeSystem = new UpgradeSystem();
-    this.bestScore = Number(localStorage.getItem("rift-outlast-best") || 0);
-    this.backgroundSeed = Array.from({ length: 140 }, () => ({ x: randomRange(-2400, 2400), y: randomRange(-2400, 2400), size: randomRange(6, 32), alpha: randomRange(0.04, 0.12) }));
+    this.elitesDefeated = 0;
+    this.bossesDefeated = 0;
+    this.shardsEarned = 0;
+    this.bestScore = Number(localStorage.getItem(balance.records.bestKills) || 0);
+    this.bestTime = Number(localStorage.getItem(balance.records.bestTime) || 0);
+    this.nextSupplyTime = balance.events.firstSupplyTime;
   }
 
   restart() {
@@ -35,12 +45,21 @@ export class ArenaScene {
   }
 
   queueLevelUp() {
-    if (this.state === "gameover") {
+    if (this.state === "gameover" || this.state === "reward") {
       return;
     }
     this.state = "levelup";
     this.pendingChoices = this.upgradeSystem.getChoices(this.player);
     this.game.ui.showLevelUp(this.pendingChoices, this.player.level);
+  }
+
+  queueRewardChoice(label) {
+    if (this.state === "gameover" || this.state === "levelup") {
+      return;
+    }
+    this.state = "reward";
+    this.rewardChoices = this.upgradeSystem.getRewardChoices(this.player);
+    this.game.ui.showReward(this.rewardChoices, label);
   }
 
   selectUpgrade(choice) {
@@ -55,6 +74,12 @@ export class ArenaScene {
     }
   }
 
+  selectReward(choice) {
+    this.upgradeSystem.applyChoice(this.player, choice);
+    this.state = "running";
+    this.game.ui.clearOverlay();
+  }
+
   update(delta) {
     if (this.game.input.consumePause()) {
       if (this.state === "running") {
@@ -64,20 +89,28 @@ export class ArenaScene {
         this.resume();
       }
     }
+
     if (this.state !== "running") {
       this.game.ui.renderHud(this);
       return;
     }
+
     this.elapsed += delta;
     this.player.timeAlive = this.elapsed;
     this.player.invulnTimer = Math.max(0, this.player.invulnTimer - delta);
+    this.player.openingShield = Math.max(0, this.player.openingShield - delta);
     this.cameraShake = Math.max(0, this.cameraShake - delta * 22);
+
     if (this.player.regen > 0) {
       this.player.heal(this.player.regen * delta);
     }
+    this.player.updateTimedBuffs(delta);
+
     this.updatePlayer(delta);
     this.updateWeapons(delta);
     this.spawnSystem.update(delta, this);
+    this.updateWorldEvents();
+
     for (const enemy of this.enemies) {
       enemy.update(delta, this);
     }
@@ -87,13 +120,25 @@ export class ArenaScene {
     for (const pickup of this.pickups) {
       pickup.update(delta, this.player);
     }
+    this.updateParticles(delta);
+    this.updateTexts(delta);
+
     this.collisionSystem.update(this, delta);
     this.cleanup();
     this.game.ui.renderHud(this);
+
     if (this.player.health <= 0) {
       this.state = "gameover";
       this.bestScore = Math.max(this.bestScore, this.player.kills);
-      localStorage.setItem("rift-outlast-best", String(this.bestScore));
+      this.bestTime = Math.max(this.bestTime, this.elapsed);
+      localStorage.setItem(balance.records.bestKills, String(this.bestScore));
+      localStorage.setItem(balance.records.bestTime, String(Math.floor(this.bestTime)));
+      this.shardsEarned = this.game.meta.awardRun({
+        timeAlive: this.elapsed,
+        kills: this.player.kills,
+        elites: this.elitesDefeated,
+        bosses: this.bossesDefeated
+      });
       this.game.ui.showGameOver(this);
     }
   }
@@ -119,7 +164,7 @@ export class ArenaScene {
           const y = this.player.y + Math.sin(angle) * stats.radius * this.player.areaMultiplier;
           for (const enemy of this.enemies) {
             if (distance({ x, y }, enemy) <= stats.size + enemy.radius) {
-              this.damageEnemy(enemy, this.scaleDamage(stats.damage) * delta * 4.5, weaponId);
+              this.damageEnemy(enemy, this.scaleDamage(stats.damage) * delta * 4.6, weaponId);
             }
           }
         }
@@ -128,7 +173,20 @@ export class ArenaScene {
       if (weapon.kind === "aura") {
         const existing = this.projectiles.find((projectile) => projectile.type === "zone" && projectile.weaponId === weaponId);
         if (!existing) {
-          this.projectiles.push(new Projectile({ type: "zone", team: "player", weaponId, x: this.player.x, y: this.player.y, radius: stats.radius * this.player.areaMultiplier, damage: this.scaleDamage(stats.damage), tickRate: stats.tick, slow: stats.slow, followPlayer: true }));
+          this.projectiles.push(
+            new Projectile({
+              type: "zone",
+              team: "player",
+              weaponId,
+              x: this.player.x,
+              y: this.player.y,
+              radius: stats.radius * this.player.areaMultiplier,
+              damage: this.scaleDamage(stats.damage),
+              tickRate: stats.tick,
+              slow: stats.slow,
+              followPlayer: true
+            })
+          );
         } else {
           existing.radius = stats.radius * this.player.areaMultiplier;
           existing.damage = this.scaleDamage(stats.damage);
@@ -157,6 +215,55 @@ export class ArenaScene {
     }
   }
 
+  updateWorldEvents() {
+    if (this.elapsed >= this.nextSupplyTime) {
+      this.nextSupplyTime += balance.events.supplyInterval;
+      const angle = randomRange(0, TAU);
+      const dist = randomRange(120, 220);
+      if (Math.random() < balance.buffs.supplyBuffChance) {
+        const buffId = timedBuffPool[Math.floor(Math.random() * timedBuffPool.length)];
+        this.pickups.push(
+          new Pickup({
+            x: this.player.x + Math.cos(angle) * dist,
+            y: this.player.y + Math.sin(angle) * dist,
+            kind: "buff",
+            buffId,
+            radius: 13
+          })
+        );
+        this.pushFloatingText("RIFT BLESSING", this.player.x, this.player.y - 38, "#d7b8ff");
+      } else {
+        this.pickups.push(
+          new Pickup({
+            x: this.player.x + Math.cos(angle) * dist,
+            y: this.player.y + Math.sin(angle) * dist,
+            kind: "chest",
+            value: 1,
+            radius: 15
+          })
+        );
+        this.pushFloatingText("SUPPLY CACHE", this.player.x, this.player.y - 38, "#ffd166");
+      }
+    }
+  }
+
+  updateParticles(delta) {
+    for (const particle of this.particles) {
+      particle.life -= delta;
+      particle.x += particle.vx * delta;
+      particle.y += particle.vy * delta;
+      particle.vx *= 0.92;
+      particle.vy *= 0.92;
+    }
+  }
+
+  updateTexts(delta) {
+    for (const text of this.floatingTexts) {
+      text.life -= delta;
+      text.y -= text.speed * delta;
+    }
+  }
+
   getNearestEnemy(origin = this.player) {
     let best = null;
     let bestDistance = Infinity;
@@ -179,7 +286,14 @@ export class ArenaScene {
   }
 
   scaleDamage(baseDamage) {
-    return baseDamage * this.player.damageMultiplier * (Math.random() < this.player.critChance ? 2 : 1);
+    let total = baseDamage * this.player.damageMultiplier;
+    if (this.player.openingShield > 0) {
+      total *= 1.18;
+    }
+    if (Math.random() < this.player.critChance) {
+      total *= 2;
+    }
+    return total;
   }
 
   createProjectile(config) {
@@ -192,7 +306,19 @@ export class ArenaScene {
     for (let i = 0; i < total; i += 1) {
       const spread = (i - (total - 1) / 2) * 0.08;
       const velocity = fromAngle(angle + spread, stats.speed * this.player.projectileSpeedMultiplier);
-      this.createProjectile({ x: this.player.x, y: this.player.y, vx: velocity.x, vy: velocity.y, angle: angle + spread, speed: stats.speed * this.player.projectileSpeedMultiplier, radius: stats.size, life: stats.life, damage: this.scaleDamage(stats.damage), team: "player", weaponId });
+      this.createProjectile({
+        x: this.player.x,
+        y: this.player.y,
+        vx: velocity.x,
+        vy: velocity.y,
+        angle: angle + spread,
+        speed: stats.speed * this.player.projectileSpeedMultiplier,
+        radius: stats.size,
+        life: stats.life,
+        damage: this.scaleDamage(stats.damage),
+        team: "player",
+        weaponId
+      });
     }
   }
 
@@ -202,12 +328,35 @@ export class ArenaScene {
     for (let i = 0; i < total; i += 1) {
       const offset = total === 1 ? 0 : (i / (total - 1) - 0.5) * stats.spread;
       const velocity = fromAngle(angle + offset, stats.speed * this.player.projectileSpeedMultiplier);
-      this.createProjectile({ x: this.player.x, y: this.player.y, vx: velocity.x, vy: velocity.y, angle: angle + offset, speed: stats.speed * this.player.projectileSpeedMultiplier, radius: stats.size, life: stats.life, damage: this.scaleDamage(stats.damage), team: "player", weaponId });
+      this.createProjectile({
+        x: this.player.x,
+        y: this.player.y,
+        vx: velocity.x,
+        vy: velocity.y,
+        angle: angle + offset,
+        speed: stats.speed * this.player.projectileSpeedMultiplier,
+        radius: stats.size,
+        life: stats.life,
+        damage: this.scaleDamage(stats.damage),
+        team: "player",
+        weaponId
+      });
     }
   }
 
   fireNova(weaponId, stats) {
-    this.createProjectile({ type: "zone", x: this.player.x, y: this.player.y, radius: stats.radius * this.player.areaMultiplier, damage: this.scaleDamage(stats.damage), tickRate: 0.1, team: "player", weaponId, knockback: stats.knockback, life: 0.16 });
+    this.createProjectile({
+      type: "zone",
+      x: this.player.x,
+      y: this.player.y,
+      radius: stats.radius * this.player.areaMultiplier,
+      damage: this.scaleDamage(stats.damage),
+      tickRate: 0.1,
+      team: "player",
+      weaponId,
+      knockback: stats.knockback,
+      life: 0.16
+    });
   }
 
   fireHoming(weaponId, stats) {
@@ -215,7 +364,21 @@ export class ArenaScene {
     for (let i = 0; i < total; i += 1) {
       const angle = this.getAimAngle() + (i - (total - 1) / 2) * 0.2;
       const velocity = fromAngle(angle, stats.speed * this.player.projectileSpeedMultiplier);
-      this.createProjectile({ x: this.player.x, y: this.player.y, vx: velocity.x, vy: velocity.y, angle, speed: stats.speed * this.player.projectileSpeedMultiplier, radius: stats.size, life: stats.life * this.player.durationMultiplier, damage: this.scaleDamage(stats.damage), behavior: "homing", turnRate: stats.turnRate, team: "player", weaponId });
+      this.createProjectile({
+        x: this.player.x,
+        y: this.player.y,
+        vx: velocity.x,
+        vy: velocity.y,
+        angle,
+        speed: stats.speed * this.player.projectileSpeedMultiplier,
+        radius: stats.size,
+        life: stats.life * this.player.durationMultiplier,
+        damage: this.scaleDamage(stats.damage),
+        behavior: "homing",
+        turnRate: stats.turnRate,
+        team: "player",
+        weaponId
+      });
     }
   }
 
@@ -225,7 +388,20 @@ export class ArenaScene {
     for (let i = 0; i < total; i += 1) {
       const spread = (i - (total - 1) / 2) * 0.06;
       const velocity = fromAngle(angle + spread, stats.speed * this.player.projectileSpeedMultiplier);
-      this.createProjectile({ x: this.player.x, y: this.player.y, vx: velocity.x, vy: velocity.y, angle: angle + spread, speed: stats.speed * this.player.projectileSpeedMultiplier, radius: stats.size, life: stats.life, damage: this.scaleDamage(stats.damage), pierce: stats.pierce, team: "player", weaponId });
+      this.createProjectile({
+        x: this.player.x,
+        y: this.player.y,
+        vx: velocity.x,
+        vy: velocity.y,
+        angle: angle + spread,
+        speed: stats.speed * this.player.projectileSpeedMultiplier,
+        radius: stats.size,
+        life: stats.life,
+        damage: this.scaleDamage(stats.damage),
+        pierce: stats.pierce,
+        team: "player",
+        weaponId
+      });
     }
   }
 
@@ -234,7 +410,23 @@ export class ArenaScene {
     for (let i = 0; i < stats.count; i += 1) {
       const spread = (i - (stats.count - 1) / 2) * 0.24;
       const velocity = fromAngle(angle + spread, stats.speed * this.player.projectileSpeedMultiplier);
-      this.createProjectile({ x: this.player.x, y: this.player.y, vx: velocity.x, vy: velocity.y, angle: angle + spread, speed: stats.speed * this.player.projectileSpeedMultiplier, radius: stats.size, life: stats.duration * this.player.durationMultiplier * 2, damage: this.scaleDamage(stats.damage), behavior: "boomerang", outboundTime: stats.duration * this.player.durationMultiplier, returnSpeed: stats.returnSpeed, pierce: 99, team: "player", weaponId });
+      this.createProjectile({
+        x: this.player.x,
+        y: this.player.y,
+        vx: velocity.x,
+        vy: velocity.y,
+        angle: angle + spread,
+        speed: stats.speed * this.player.projectileSpeedMultiplier,
+        radius: stats.size,
+        life: stats.duration * this.player.durationMultiplier * 2,
+        damage: this.scaleDamage(stats.damage),
+        behavior: "boomerang",
+        outboundTime: stats.duration * this.player.durationMultiplier,
+        returnSpeed: stats.returnSpeed,
+        pierce: 99,
+        team: "player",
+        weaponId
+      });
     }
   }
 
@@ -246,12 +438,64 @@ export class ArenaScene {
 
   spawnEnemyProjectile(enemy, nx, ny) {
     const speed = enemy.id === "boss" ? 250 : 200;
-    this.createProjectile({ x: enemy.x, y: enemy.y, vx: nx * speed, vy: ny * speed, radius: enemy.id === "boss" ? 10 : 7, life: 3, damage: enemy.damage, team: "enemy", color: enemy.color });
+    this.createProjectile({
+      x: enemy.x,
+      y: enemy.y,
+      vx: nx * speed,
+      vy: ny * speed,
+      radius: enemy.id === "boss" ? 10 : 7,
+      life: 3,
+      damage: enemy.damage,
+      team: "enemy",
+      color: enemy.color
+    });
+  }
+
+  spawnRadialBurst(enemy, count) {
+    this.pushFloatingText(enemy.phase >= 3 ? "ANNIHILATION" : "VOID BURST", enemy.x, enemy.y - enemy.radius - 30, "#ffd38e", 0.85);
+    this.addBurst(enemy.x, enemy.y, "#ffd38e", 16, 90);
+    for (let index = 0; index < count; index += 1) {
+      const angle = (index / count) * TAU;
+      this.createProjectile({
+        x: enemy.x,
+        y: enemy.y,
+        vx: Math.cos(angle) * 220,
+        vy: Math.sin(angle) * 220,
+        radius: enemy.phase >= 3 ? 9 : 8,
+        life: 3,
+        damage: enemy.damage * (enemy.phase >= 3 ? 1.15 : 1),
+        team: "enemy",
+        color: "#ffd38e"
+      });
+    }
+    this.cameraShake = Math.max(this.cameraShake, 10 + enemy.phase * 2);
+  }
+
+  spawnBossAdds(enemy, count) {
+    this.pushFloatingText("CALL OF THE RIFT", enemy.x, enemy.y - enemy.radius - 18, "#ffb9f4", 0.8);
+    for (let index = 0; index < count; index += 1) {
+      const angle = (index / count) * TAU + randomRange(-0.24, 0.24);
+      this.createEnemy(
+        enemy.baseConfig.summonType || "dasher",
+        enemy.x + Math.cos(angle) * 54,
+        enemy.y + Math.sin(angle) * 54,
+        0.9 + enemy.phase * 0.08
+      );
+    }
+  }
+
+  onBossPhaseChange(enemy, phase) {
+    this.cameraShake = Math.max(this.cameraShake, 16);
+    this.addBurst(enemy.x, enemy.y, phase >= 3 ? "#ffb06c" : "#f5d0ff", 20, 110);
+    this.pushFloatingText(phase === 2 ? "BOSS ENRAGED" : "FINAL PHASE", enemy.x, enemy.y - enemy.radius - 22, "#fff1a3", 1.1);
   }
 
   damageEnemy(enemy, damage, weaponId, source = null) {
     enemy.health -= damage;
     enemy.takeHit();
+    this.addBurst(enemy.x, enemy.y, source?.weaponId === "frostField" ? "#92dfff" : "#ffcf7d", enemy.id === "boss" ? 10 : 6);
+    this.pushFloatingText(`${Math.max(1, Math.round(damage))}`, enemy.x, enemy.y - enemy.radius - 8, "#fff4c2", 0.4);
+
     if (source?.type === "zone" && source.knockback) {
       const dx = enemy.x - this.player.x;
       const dy = enemy.y - this.player.y;
@@ -262,21 +506,74 @@ export class ArenaScene {
     if (enemy.health <= 0 && enemy.alive) {
       enemy.alive = false;
       this.player.kills += 1;
+      if (enemy.id === "elite") {
+        this.elitesDefeated += 1;
+      }
+      if (enemy.id === "boss") {
+        this.bossesDefeated += 1;
+      }
       this.cameraShake = Math.max(this.cameraShake, enemy.id === "boss" ? 18 : 6);
-      this.pickups.push(new Pickup({ x: enemy.x, y: enemy.y, value: enemy.xp, kind: "xp", radius: 8 }));
+      this.pickups.push(new Pickup({ x: enemy.x, y: enemy.y, value: enemy.xp, kind: "xp", radius: 10 }));
+      this.addBurst(enemy.x, enemy.y, "#ffcf7d", enemy.id === "boss" ? 18 : 8, 80);
       if (enemy.id === "splitter") {
         for (let i = 0; i < enemy.baseConfig.splitCount; i += 1) {
           const angle = (i / enemy.baseConfig.splitCount) * TAU;
           this.createEnemy(enemy.baseConfig.splitInto, enemy.x + Math.cos(angle) * 20, enemy.y + Math.sin(angle) * 20, 0.85);
         }
       }
+
+      const healChance =
+        enemy.id === "elite"
+          ? 0.8
+          : enemy.id === "juggernaut"
+            ? balance.drops.heavyHealChance + this.player.lootLuck
+            : balance.drops.commonHealChance + this.player.lootLuck * 0.5;
+
+      if (Math.random() < healChance) {
+        this.pickups.push(new Pickup({ x: enemy.x + randomRange(-10, 10), y: enemy.y + randomRange(-10, 10), kind: "heal", value: 16, radius: 11 }));
+      }
+
+      if (enemy.id === "elite" && Math.random() < balance.drops.eliteChestChance + this.player.lootLuck) {
+        this.pickups.push(new Pickup({ x: enemy.x, y: enemy.y, kind: "chest", value: 1, radius: 15 }));
+      }
+
+      if ((enemy.id === "elite" && Math.random() < balance.drops.eliteBuffChance + this.player.lootLuck * 0.6) || enemy.id === "boss") {
+        const buffId = timedBuffPool[Math.floor(Math.random() * timedBuffPool.length)];
+        this.pickups.push(new Pickup({ x: enemy.x + randomRange(-18, 18), y: enemy.y + randomRange(-18, 18), kind: "buff", buffId, radius: 13 }));
+      }
+
+      if (enemy.id === "boss") {
+        for (let count = 0; count < balance.drops.bossChestCount; count += 1) {
+          this.pickups.push(
+            new Pickup({
+              x: enemy.x + randomRange(-24, 24),
+              y: enemy.y + randomRange(-24, 24),
+              kind: "chest",
+              value: 1,
+              radius: 15
+            })
+          );
+        }
+      }
     }
+  }
+
+  addBurst(x, y, color, count = 8, speed = 52) {
+    this.game.renderer.createBurst(this, x, y, color, count, speed);
+  }
+
+  pushFloatingText(text, x, y, color = "#fff4c2", life = 0.6) {
+    this.floatingTexts.push({ text, x, y, color, speed: 22, life, maxLife: life });
   }
 
   cleanup() {
     this.enemies = this.enemies.filter((enemy) => enemy.alive);
-    this.projectiles = this.projectiles.filter((projectile) => projectile.alive && Math.abs(projectile.x - this.player.x) < 1400 && Math.abs(projectile.y - this.player.y) < 1000);
+    this.projectiles = this.projectiles.filter(
+      (projectile) => projectile.alive && Math.abs(projectile.x - this.player.x) < 1500 && Math.abs(projectile.y - this.player.y) < 1100
+    );
     this.pickups = this.pickups.filter((pickup) => pickup.alive);
+    this.particles = this.particles.filter((particle) => particle.life > 0);
+    this.floatingTexts = this.floatingTexts.filter((text) => text.life > 0);
   }
 
   render(ctx) {
@@ -286,27 +583,18 @@ export class ArenaScene {
     const shakeY = this.cameraShake > 0 ? randomRange(-this.cameraShake, this.cameraShake) : 0;
     const cameraX = this.player.x - width / 2 + shakeX;
     const cameraY = this.player.y - height / 2 + shakeY;
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#07141c";
-    ctx.fillRect(0, 0, width, height);
-    this.renderBackground(ctx, cameraX, cameraY, width, height);
-    this.renderGrid(ctx, cameraX, cameraY, width, height);
+    const renderer = this.game.renderer;
+
+    renderer.drawSceneBackground(ctx, cameraX, cameraY, width, height, this.elapsed);
+
     for (const pickup of this.pickups) {
-      this.drawCircle(ctx, pickup.x - cameraX, pickup.y - cameraY, pickup.radius, "#ffd166");
+      renderer.drawPickup(ctx, pickup, cameraX, cameraY, this.elapsed);
     }
+
     for (const projectile of this.projectiles) {
-      if (projectile.type === "zone") {
-        ctx.beginPath();
-        ctx.arc(projectile.x - cameraX, projectile.y - cameraY, projectile.radius, 0, TAU);
-        ctx.fillStyle = projectile.weaponId === "frostField" ? "rgba(141, 240, 255, 0.15)" : "rgba(200, 168, 255, 0.18)";
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = projectile.weaponId === "frostField" ? "rgba(141, 240, 255, 0.55)" : "rgba(200, 168, 255, 0.55)";
-        ctx.stroke();
-      } else {
-        this.drawCircle(ctx, projectile.x - cameraX, projectile.y - cameraY, projectile.radius, projectile.team === "enemy" ? projectile.color || "#82e89d" : "#f8fafc");
-      }
+      renderer.drawProjectile(ctx, projectile, cameraX, cameraY, this.elapsed);
     }
+
     for (const [weaponId, level] of this.player.weapons.entries()) {
       const weapon = weapons[weaponId];
       if (weapon.kind !== "orbital") {
@@ -318,61 +606,49 @@ export class ArenaScene {
         const angle = state.angle + (i / stats.count) * TAU;
         const x = this.player.x + Math.cos(angle) * stats.radius * this.player.areaMultiplier;
         const y = this.player.y + Math.sin(angle) * stats.radius * this.player.areaMultiplier;
-        this.drawCircle(ctx, x - cameraX, y - cameraY, stats.size, weapon.color);
+        renderer.drawOrbital(ctx, weapon, stats, angle, x, y, cameraX, cameraY);
       }
     }
+
     for (const enemy of this.enemies) {
-      this.drawCircle(ctx, enemy.x - cameraX, enemy.y - cameraY, enemy.radius, enemy.hitFlash > 0 ? "#ffffff" : enemy.color);
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillRect(enemy.x - cameraX - enemy.radius, enemy.y - cameraY - enemy.radius - 10, enemy.radius * 2, 5);
-      ctx.fillStyle = "#ff7f88";
-      ctx.fillRect(enemy.x - cameraX - enemy.radius, enemy.y - cameraY - enemy.radius - 10, (enemy.health / enemy.maxHealth) * enemy.radius * 2, 5);
+      renderer.drawEnemy(ctx, enemy, cameraX, cameraY, this.elapsed);
+      renderer.drawHealthBar(ctx, enemy, cameraX, cameraY);
     }
-    this.drawCircle(ctx, this.player.x - cameraX, this.player.y - cameraY, this.player.radius, this.player.color);
-    if (this.player.invulnTimer > 0) {
+
+    renderer.drawPlayer(ctx, this.player, cameraX, cameraY, this.elapsed);
+    renderer.drawParticles(ctx, this.particles, cameraX, cameraY);
+    renderer.drawFloatingTexts(ctx, this.floatingTexts, cameraX, cameraY);
+
+    const boss = this.enemies.find((enemy) => enemy.id === "boss");
+    if (boss) {
+      ctx.save();
+      ctx.strokeStyle = boss.phase >= 3 ? "rgba(255, 176, 108, 0.36)" : "rgba(245, 208, 255, 0.32)";
+      ctx.lineWidth = boss.phase >= 3 ? 4 : 3;
       ctx.beginPath();
-      ctx.arc(this.player.x - cameraX, this.player.y - cameraY, this.player.radius + 6, 0, TAU);
-      ctx.strokeStyle = "rgba(255,255,255,0.45)";
+      ctx.arc(boss.x - cameraX, boss.y - cameraY, boss.radius + 16 + Math.sin(this.elapsed * 5) * 4, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (this.player.openingShield > 0) {
+      const glow = 0.25 + this.player.openingShield * 0.12;
+      ctx.beginPath();
+      ctx.arc(this.player.x - cameraX, this.player.y - cameraY, this.player.radius + 10, 0, TAU);
+      ctx.strokeStyle = `rgba(126, 240, 168, ${glow})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    } else if (this.player.invulnTimer > 0) {
+      ctx.beginPath();
+      ctx.arc(this.player.x - cameraX, this.player.y - cameraY, this.player.radius + 8, 0, TAU);
+      ctx.strokeStyle = "rgba(255,255,255,0.42)";
       ctx.lineWidth = 2;
       ctx.stroke();
     }
-  }
 
-  renderBackground(ctx, cameraX, cameraY, width, height) {
-    for (const star of this.backgroundSeed) {
-      const x = star.x - cameraX * 0.14;
-      const y = star.y - cameraY * 0.14;
-      const sx = ((x % (width + 200)) + width + 200) % (width + 200) - 100;
-      const sy = ((y % (height + 200)) + height + 200) % (height + 200) - 100;
-      ctx.fillStyle = `rgba(107, 225, 190, ${star.alpha})`;
-      ctx.fillRect(sx, sy, star.size, star.size);
-    }
-  }
-
-  renderGrid(ctx, cameraX, cameraY, width, height) {
-    const grid = 72;
-    const startX = -((cameraX % grid) + grid) % grid;
-    const startY = -((cameraY % grid) + grid) % grid;
-    ctx.strokeStyle = "rgba(164, 223, 229, 0.08)";
-    ctx.lineWidth = 1;
-    for (let x = startX; x < width; x += grid) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
-      ctx.stroke();
-    }
-    for (let y = startY; y < height; y += grid) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
-    }
-  }
-
-  drawCircle(ctx, x, y, radius, color) {
-    ctx.beginPath();
-    ctx.arc(x, y, clamp(radius, 2, 180), 0, TAU);
-    ctx.fillStyle = color;
-    ctx.fill();
+    ctx.save();
+    ctx.font = "16px KenneyFuture, monospace";
+    ctx.fillStyle = "rgba(255, 209, 102, 0.85)";
+    ctx.fillText(`Best Time ${formatTime(this.bestTime)}`, width - 220, height - 28);
+    ctx.restore();
   }
 }

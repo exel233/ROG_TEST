@@ -1,5 +1,23 @@
 import { weapons } from "../data/config.js";
 
+function applyEffect(target, effect) {
+  if (effect.add) {
+    target[effect.stat] += effect.add;
+  }
+  if (effect.mult) {
+    target[effect.stat] *= effect.mult;
+  }
+}
+
+function revertEffect(target, effect) {
+  if (effect.mult) {
+    target[effect.stat] /= effect.mult;
+  }
+  if (effect.add) {
+    target[effect.stat] -= effect.add;
+  }
+}
+
 export class Projectile {
   constructor(config) {
     Object.assign(this, config);
@@ -95,8 +113,11 @@ export class Enemy {
     this.hitFlash = 0;
     this.attackCooldown = 0;
     this.dashTimer = 0;
+    this.summonTimer = config.summonCooldown || 0;
+    this.burstTimer = config.burstCooldown || 0;
     this.slowFactor = 1;
     this.slowTimer = 0;
+    this.phase = 1;
   }
 
   update(delta, scene) {
@@ -114,7 +135,42 @@ export class Enemy {
     const nx = dx / dist;
     const ny = dy / dist;
     const speed = this.speed * this.slowFactor;
+    if (this.behavior === "summon") {
+      this.x += nx * speed * 0.75 * delta;
+      this.y += ny * speed * 0.75 * delta;
+      this.summonTimer -= delta;
+      if (this.summonTimer <= 0 && scene.enemies.length < 180) {
+        this.summonTimer = this.baseConfig.summonCooldown || 7;
+        for (let index = 0; index < (this.baseConfig.summonCount || 1); index += 1) {
+          const angle = (index / (this.baseConfig.summonCount || 1)) * Math.PI * 2;
+          scene.createEnemy(
+            this.baseConfig.summonType || "crawler",
+            this.x + Math.cos(angle) * 18,
+            this.y + Math.sin(angle) * 18,
+            0.82
+          );
+        }
+      }
+      return;
+    }
     if (this.behavior === "ranged" || this.behavior === "boss") {
+      if (this.behavior === "boss") {
+        const healthRatio = this.health / this.maxHealth;
+        if (healthRatio <= 0.66 && this.phase < 2) {
+          this.phase = 2;
+          this.speed *= 1.08;
+          this.damage *= 1.1;
+          this.attackCooldown = Math.min(this.attackCooldown, 0.45);
+          scene.onBossPhaseChange(this, 2);
+        }
+        if (healthRatio <= 0.33 && this.phase < 3) {
+          this.phase = 3;
+          this.speed *= 1.12;
+          this.damage *= 1.12;
+          this.attackCooldown = Math.min(this.attackCooldown, 0.35);
+          scene.onBossPhaseChange(this, 3);
+        }
+      }
       const preferredRange = this.baseConfig.preferredRange || 220;
       if (dist > preferredRange + 20) {
         this.x += nx * speed * delta;
@@ -125,7 +181,19 @@ export class Enemy {
       }
       if (this.attackCooldown <= 0) {
         scene.spawnEnemyProjectile(this, nx, ny);
-        this.attackCooldown = this.baseConfig.shotCooldown || 2.6;
+        this.attackCooldown = (this.baseConfig.shotCooldown || 2.6) * (this.behavior === "boss" ? Math.max(0.62, 1 - (this.phase - 1) * 0.14) : 1);
+      }
+      if (this.behavior === "boss") {
+        this.burstTimer -= delta;
+        this.summonTimer -= delta;
+        if (this.burstTimer <= 0) {
+          scene.spawnRadialBurst(this, (this.baseConfig.burstCount || 10) + (this.phase - 1) * 2);
+          this.burstTimer = Math.max(3.4, (this.baseConfig.burstCooldown || 7) - (this.phase - 1) * 1.15);
+        }
+        if (this.phase >= 2 && this.summonTimer <= 0 && scene.enemies.length < 200) {
+          scene.spawnBossAdds(this, (this.baseConfig.summonCount || 2) + this.phase - 2);
+          this.summonTimer = Math.max(5.5, (this.baseConfig.summonCooldown || 12) - (this.phase - 2) * 2.2);
+        }
       }
       return;
     }
@@ -159,7 +227,7 @@ export class Enemy {
 }
 
 export class Player {
-  constructor(character) {
+  constructor(character, metaBonuses = []) {
     const stats = character.baseStats;
     this.character = character;
     this.x = 0;
@@ -185,12 +253,25 @@ export class Player {
     this.regen = 0;
     this.armor = stats.armor ?? 0;
     this.luck = stats.luck ?? 0;
+    this.lootLuck = stats.lootLuck ?? 0;
+    this.overclock = 0;
     this.invulnTimer = 0;
+    this.openingShield = 0;
     this.weapons = new Map();
     this.passives = new Map();
     this.weaponState = new Map();
     this.pendingLevels = 0;
+    this.activeBuffs = [];
     this.xpToNext = this.getXpTarget();
+    if (stats.xpMultiplier) {
+      this.xpMultiplier *= stats.xpMultiplier;
+    }
+    for (const effect of metaBonuses) {
+      applyEffect(this, effect);
+      if (effect.stat === "maxHealth") {
+        this.health += effect.add || 0;
+      }
+    }
     for (const weaponId of character.startingWeapons) {
       this.addWeapon(weaponId);
     }
@@ -240,7 +321,13 @@ export class Player {
       case "extraProjectiles":
       case "critChance":
       case "armor":
+      case "lootLuck":
         this[definition.apply] += value;
+        break;
+      case "overclock":
+        this.overclock += value;
+        this.damageMultiplier *= 1.08;
+        this.moveSpeed += 12;
         break;
       case "maxHealth":
         this.maxHealth += value;
@@ -251,11 +338,44 @@ export class Player {
     }
   }
 
+  updateTimedBuffs(delta) {
+    for (const buff of this.activeBuffs) {
+      buff.remaining -= delta;
+    }
+    const expired = this.activeBuffs.filter((buff) => buff.remaining <= 0);
+    for (const buff of expired) {
+      for (let index = buff.effects.length - 1; index >= 0; index -= 1) {
+        revertEffect(this, buff.effects[index]);
+      }
+    }
+    this.activeBuffs = this.activeBuffs.filter((buff) => buff.remaining > 0);
+  }
+
+  applyTimedBuff(definition) {
+    const existing = this.activeBuffs.find((buff) => buff.id === definition.id);
+    if (existing) {
+      existing.remaining = Math.max(existing.remaining, definition.duration);
+      return;
+    }
+    for (const effect of definition.effects) {
+      applyEffect(this, effect);
+    }
+    this.activeBuffs.push({
+      id: definition.id,
+      name: definition.name,
+      color: definition.color,
+      remaining: definition.duration,
+      duration: definition.duration,
+      effects: definition.effects
+    });
+  }
+
   takeDamage(amount) {
     if (this.invulnTimer > 0) {
       return false;
     }
-    this.health -= Math.max(1, amount * (1 - this.armor));
+    const openingReduction = this.openingShield > 0 ? 0.35 : 0;
+    this.health -= Math.max(1, amount * (1 - this.armor - openingReduction));
     this.invulnTimer = 0.45;
     return true;
   }
