@@ -1,5 +1,6 @@
 import { balance } from "../data/balance.js";
 import { characters, encounterSchedule, enemies, passivePool, passives, timedBuffPool, timedBuffs, weaponPool, weapons } from "../data/config.js";
+import { iconSources, weaponVisuals } from "../data/visuals.js";
 import { circlesOverlap, distance, formatTime, pickRandom, randomRange } from "../utils/math.js";
 
 export class Input {
@@ -219,6 +220,15 @@ export class CollisionSystem {
           projectile.alive = false;
           scene.cameraShake = Math.max(scene.cameraShake, 10);
           scene.addBurst(projectile.x, projectile.y, "#8ef1a7", 6, 50);
+          scene.spawnEffect({
+            x: projectile.x,
+            y: projectile.y,
+            key: (weaponVisuals[projectile.weaponId] || weaponVisuals.enemy).hitFx,
+            color: (weaponVisuals[projectile.weaponId] || weaponVisuals.enemy).color,
+            size: 32,
+            life: 0.18,
+            growth: 20
+          });
         }
         continue;
       }
@@ -246,6 +256,17 @@ export class CollisionSystem {
           if (projectile.pierce > 0) {
             projectile.pierce -= 1;
           } else {
+            const visual = weaponVisuals[projectile.weaponId];
+            if (visual?.deathFx) {
+              scene.spawnEffect({
+                x: projectile.x,
+                y: projectile.y,
+                key: visual.deathFx,
+                color: visual.color,
+                size: 26,
+                life: 0.14
+              });
+            }
             projectile.alive = false;
             break;
           }
@@ -302,6 +323,25 @@ export class UiController {
     this.handlers = handlers;
   }
 
+  getChoiceIcon(choice) {
+    if (choice.type === "weapon-new" || choice.type === "weapon-level") {
+      return iconSources.weapons[choice.id] || "";
+    }
+    if (choice.type === "passive") {
+      return iconSources.passives[choice.id] || "";
+    }
+    return iconSources.rewards[choice.id] || iconSources.passives.scholar;
+  }
+
+  decorateList(items, iconMap) {
+    return items
+      .map(([id, level]) => {
+        const icon = iconMap[id] ? `<img class="list-icon" src="${iconMap[id]}" alt="" />` : "";
+        return `<li>${icon}<span>${id in weapons ? weapons[id].name : passives[id].name}</span><strong>Lv.${level}</strong></li>`;
+      })
+      .join("");
+  }
+
   renderHud(scene) {
     const player = scene.player;
     this.healthFill.style.width = `${(player.health / player.maxHealth) * 100}%`;
@@ -312,15 +352,11 @@ export class UiController {
     this.timeText.textContent = formatTime(scene.elapsed);
     this.killsText.textContent = String(player.kills);
     this.recordText.textContent = `${scene.bestScore} / ${formatTime(scene.bestTime)}`;
-    this.weaponList.innerHTML = [...player.weapons.entries()]
-      .map(([weaponId, level]) => `<li>${weapons[weaponId].name} <strong>Lv.${level}</strong></li>`)
-      .join("");
-    this.passiveList.innerHTML = [...player.passives.entries()]
-      .map(([passiveId, level]) => `<li>${passives[passiveId].name} <strong>Lv.${level}</strong></li>`)
-      .join("");
+    this.weaponList.innerHTML = this.decorateList([...player.weapons.entries()], iconSources.weapons);
+    this.passiveList.innerHTML = this.decorateList([...player.passives.entries()], iconSources.passives);
     this.buffList.innerHTML = player.activeBuffs.length
       ? player.activeBuffs
-          .map((buff) => `<li style="color:${buff.color}">${buff.name} <strong>${Math.ceil(buff.remaining)}s</strong></li>`)
+          .map((buff) => `<li style="color:${buff.color}"><span>${buff.name}</span><strong>${Math.ceil(buff.remaining)}s</strong></li>`)
           .join("")
       : "<li>None</li>";
   }
@@ -349,6 +385,7 @@ export class UiController {
                   .map(
                     (character) => `
                       <button class="hero-card" data-character="${character.id}">
+                        <img class="hero-icon" src="${iconSources.characters[character.id]}" alt="" />
                         <div class="hero-title">
                           <strong>${character.name}</strong>
                           <span class="badge">${character.tag}</span>
@@ -371,6 +408,7 @@ export class UiController {
                   .map(
                     (upgrade) => `
                       <button class="choice-card meta-card" data-meta-upgrade="${upgrade.id}" ${upgrade.nextCost === null || !upgrade.affordable ? "disabled" : ""}>
+                        <img class="choice-icon" src="${iconSources.passives.scholar}" alt="" />
                         <strong>${upgrade.name}</strong>
                         <p>${upgrade.description}</p>
                         <small>Level ${upgrade.level}/${upgrade.maxLevel}${upgrade.nextCost === null ? " | MAX" : ` | Cost ${upgrade.nextCost}`}</small>
@@ -404,6 +442,7 @@ export class UiController {
               .map(
                 (choice, index) => `
                   <button class="choice-card" data-choice="${index}">
+                    <img class="choice-icon" src="${this.getChoiceIcon(choice)}" alt="" />
                     <strong>${choice.name}</strong>
                     <p>${choice.description}</p>
                     <small>${choice.type}</small>

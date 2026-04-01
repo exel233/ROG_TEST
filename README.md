@@ -1,6 +1,6 @@
 # Rift Outlast
 
-Rift Outlast is a browser-based 2D top-down survival action game prototype built with vanilla JavaScript and HTML5 Canvas. It keeps the original playable loop, then layers in pixel-art presentation, stronger early-game pacing, richer rewards, and clearer extension points for future content.
+Rift Outlast is a browser-based 2D top-down survival action game built with vanilla JavaScript and HTML5 Canvas. This version keeps the original playable prototype, then continues iterating toward a stronger pixel-art presentation, clearer combat feedback, and a smoother early-game power curve.
 
 ## Run
 
@@ -22,53 +22,114 @@ If `5173` is already in use, the local server automatically retries on the next 
 - Mouse: click upgrade or reward cards
 - `Esc`: pause or resume
 
-## What Is In The Current Build
+## Current Build Highlights
 
-### Core Gameplay
+### Core Survival Loop
 
 - Auto-attacking survival combat
-- Experience drops, leveling, and pause-on-level-up choices
-- Enemy escalation with elite marks and a boss encounter
+- Enemy swarms, elites, and a boss encounter
+- Experience drops, level-up pauses, and build choices
 - Game over, restart, and character selection
 
-### Playable Content
+### Visual Upgrade
+
+- Cohesive pixel-art rendering based on CC0 fantasy pixel packs
+- Stronger battlefield tiling with floor overlays and prop clutter
+- Sprite-based player, enemy, pickup, and orbital weapon rendering
+- Real projectile visuals for every weapon archetype
+- Muzzle flashes, slash FX, hit sparks, burst FX, smoke fades, and floating damage text
+- Pixel-themed UI panels, icon-driven cards, and improved build HUD
+
+### Content and Progression
 
 - 3 playable characters
 - 8 weapon archetypes
 - 15 permanent passive upgrades
 - 4 temporary blessing buffs
-- 9 enemy archetypes including elite, summoner, and boss
-- Healing drops, supply caches, and rare chest rewards
+- 9 enemy archetypes including elite, summoner, and phase-based boss
+- Healing drops, supply caches, rare rewards, and persistent meta shards
 
-### Visual Upgrade
+### Balance Improvements
 
-- Pixel-art battlefield rendering with sprite atlases
-- Pixel-style UI theme and local bitmap-friendly font
-- Sprite-based player, enemy, and pickup presentation
-- Floating damage text, particle bursts, pickup feedback, and stronger hit feel
-- Dark fantasy dungeon floor tiling instead of the original abstract geometry
+- Faster first and second levels
+- Better pickup flow and smoother early XP gain
+- Stronger starting character baselines
+- More reliable opening weapon performance
+- Slightly slower early enemy ramp while mid-game challenge remains
 
-### Progression
+## Open Source Assets And Licenses
 
-- Smoother early-game pacing and stronger opening survivability
-- Opening shield to reduce early frustration
-- Persistent shard currency across runs
-- Meta upgrades that improve future runs
-- Best kills and best survival time saved locally
+All newly integrated art assets in this version use clear CC0 licensing.
 
-## Open Source Assets
+### World, Characters, Props
 
-This project includes lightweight open-source assets from:
+- `Tiny Dungeon` by Kenney
+- Source: `https://kenney.nl/assets/tiny-dungeon`
+- License: CC0 1.0
+- Usage: dungeon tiles, player sprites, props, pickups, icons cropped from the atlas
 
-- Tiny Dungeon by Kenney
-- Tiny Creatures by Clint Bellanger, made to visually match Tiny Dungeon
-- Kenney UI Pack
+- `Tiny Creatures` by Clint Bellanger
+- Source: `https://opengameart.org/content/tiny-creatures`
+- License: CC0 1.0
+- Usage: enemy sprites and boss or elite creature visuals
 
-Local copies and license files are stored in:
+### UI And Panels
 
-- `src/assets/atlases`
-- `src/assets/fonts`
-- `src/assets/packs`
+- `UI Pack - Pixel Adventure` by Kenney
+- Source: `https://kenney.nl/assets/ui-pack-pixel-adventure`
+- License: CC0 1.0
+- Usage: panel and button tile textures used in the HUD and overlays
+
+### Combat Effects
+
+- `Particle Pack` by Kenney
+- Source: `https://kenney.nl/assets/particle-pack`
+- License: CC0 1.0
+- Usage: slash FX, muzzle flashes, sparks, smoke, traces, magic flares
+
+### Weapon And Upgrade Icons
+
+- `Roguelike Characters` by Kenney
+- Source: `https://kenney.nl/assets/roguelike-characters`
+- License: CC0 1.0
+- Usage: source reference for icon direction; this build uses cropped icon-style items and character portraits derived from the existing fantasy atlas for tighter visual consistency
+
+Local license files are stored in:
+
+- `src/assets/packs/tiny-dungeon-license.txt`
+- `src/assets/packs/tiny-creatures-license.txt`
+- `src/assets/packs/ui-pack-license.txt`
+- `src/assets/packs/ui-pack-pixel-adventure-license.txt`
+- `src/assets/packs/particle-pack-license.txt`
+- `src/assets/packs/roguelike-characters-license.txt`
+
+## Resource Directory Layout
+
+```text
+src/assets
+|- atlases
+|  |- tiny-dungeon.png
+|  `- tiny-creatures.png
+|- fx
+|  |- slash_01.png
+|  |- muzzle_01.png
+|  |- spark_01.png
+|  `- ...
+|- fonts
+|  `- KenneyFuture.ttf
+|- icons
+|  |- weapon_arcBlades.png
+|  |- passive_damage.png
+|  `- character_strider.png
+|- packs
+|  `- license files
+`- ui
+   `- pixel
+      |- panel_blue.png
+      |- panel_brown.png
+      |- button_red.png
+      `- button_green.png
+```
 
 ## Project Structure
 
@@ -82,9 +143,6 @@ Local copies and license files are stored in:
    |- main.js
    |- styles.css
    |- assets
-   |  |- atlases
-   |  |- fonts
-   |  `- packs
    |- data
    |  |- balance.js
    |  |- config.js
@@ -108,60 +166,67 @@ Local copies and license files are stored in:
 
 ## Main Modules
 
-- `src/game/Game.js`
-  - bootstrap, resize, asset loading, scene switching, main loop
-- `src/scenes/ArenaScene.js`
-  - a full run: combat, events, rewards, boss phases, pickups, particles, records
-- `src/entities/Entities.js`
-  - player, enemy, projectile, and pickup behavior
-- `src/systems/Systems.js`
-  - input, spawning, upgrades, collisions, and DOM HUD or overlay control
-- `src/systems/AssetManager.js`
-  - atlas and font loading
-- `src/systems/MetaProgression.js`
-  - persistent shards, run rewards, and meta upgrade purchases
-- `src/renderers/EntityRenderer.js`
-  - battlefield, sprites, particles, floating texts, and pickup rendering
-- `src/data/config.js`
-  - characters, weapons, passives, temporary buffs, meta upgrades, enemies
-- `src/data/balance.js`
-  - pacing, drops, events, records, and shard economy
 - `src/data/visuals.js`
-  - atlas sources, sprite mappings, floor tiles, and palette data
+  - central visual index for atlases, effect sprites, UI textures, icons, and weapon FX configuration
+- `src/renderers/EntityRenderer.js`
+  - battlefield drawing, sprite rendering, projectile visuals, effect sprite drawing, particles, and floating text
+- `src/scenes/ArenaScene.js`
+  - one full run of gameplay, including combat, drops, rewards, boss phases, and effect spawning
+- `src/systems/AssetManager.js`
+  - image and font loading
+- `src/systems/Systems.js`
+  - input, enemy spawning, upgrades, collision handling, HUD and overlay UI
+- `src/entities/Entities.js`
+  - player, projectile, enemy, and pickup behavior
+- `src/data/config.js`
+  - characters, weapons, passives, buffs, meta upgrades, enemies, encounter schedule
+- `src/data/balance.js`
+  - pacing, drops, event timing, records, and meta economy
 
-## Recent Upgrade Summary
+## Attack And Feedback Improvements
 
-### Visual Pass
+The current build now adds a clearer visual loop for combat:
 
-- Added sprite atlases and a renderer layer
-- Shifted the game to a coherent pixel-art look
-- Restyled HUD and overlays to match the game world
+- Distinct projectile looks for lance, shard, pollen, wisp, enemy shots, and returning sickles
+- Real slash visuals for orbital and boomerang-style weapons
+- Impact sparks and smoke bursts on hit or projectile expiration
+- Pulse and aura visuals for thunder and frost area attacks
+- Better projectile trails to improve direction readability
+- Stronger enemy death feedback and boss phase bursts
 
-### Balance Pass
+## Balance Changes In This Iteration
 
-- Improved opening survivability and weapon effectiveness
-- Slowed early pressure without flattening later danger
-- Added short opening protection and more stable early growth
+The player felt weaker than intended mostly because the first build-up window was still too slow and the visual confirmation of damage was too soft.
 
-### Content Pass
+This iteration improves that by:
 
-- Added summoner behavior
-- Added healing drops and timed supply cache events
-- Added temporary blessing buffs
-- Added boss enrages, radial bursts, and add summons
-- Added persistent shard rewards and menu-side meta upgrades
+- reducing early level XP requirements
+- raising the base XP multiplier
+- lengthening the opening shield window
+- strengthening starting character baselines
+- buffing the level-1 versions of `Arc Blades`, `Ember Lance`, and `Frost Field`
+- increasing pickup attraction strength
+- delaying the first enemy schedule spikes slightly
+- moving the first supply event earlier
+
+Result:
+
+- the first 30 to 60 seconds are less punishing
+- the player starts snowballing earlier
+- combat feels stronger partly because the weapons are better and partly because the visuals now confirm hits more clearly
+- the mid-game still ramps because enemy cap and growth continue scaling upward
 
 ## Known Issues
 
-- The current sprite presentation is intentionally lightweight and does not yet include full walk cycles for every actor
-- UI remains DOM-driven for stability and ease of iteration
-- The development scripts currently use a Windows-specific Node path to avoid PATH issues in this environment
-- Meta progression is intentionally compact and can still grow into a larger unlock tree later
+- Full directional walk animation sets are still not present for every actor
+- Some UI panels still rely on CSS composition instead of true nine-slice UI sprites
+- Long-session gameplay balance was improved, but not fully hand-tuned across many runs yet
+- The development scripts still use a Windows-specific Node path in `package.json` because that was the safest option in this environment
 
 ## Recommended Next Steps
 
-- Add multi-frame player and enemy animations
-- Add boss telegraph decals and more distinct late-game attack patterns
-- Split `Entities.js` and `Systems.js` into smaller files as the project grows
-- Add sound effects, settings, and optional screen shake toggles
-- Add more relic-style chest rewards and map event variations
+- add true directional movement animation sets for player and major enemies
+- add telegraph decals for boss radial attacks
+- expand relic-style reward variety from chests
+- split `Entities.js` and `Systems.js` into smaller files as the project grows
+- add sound effects, settings, and optional accessibility toggles for shake and hit flash

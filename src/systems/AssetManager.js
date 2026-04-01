@@ -1,4 +1,4 @@
-import { atlases } from "../data/visuals.js";
+import { atlases, imageAssets } from "../data/visuals.js";
 
 export class AssetManager {
   constructor() {
@@ -7,8 +7,9 @@ export class AssetManager {
   }
 
   async loadAll() {
-    const imageJobs = Object.values(atlases).map((atlas) => this.loadImage(atlas.key, atlas.src));
-    await Promise.all(imageJobs);
+    const atlasJobs = Object.values(atlases).map((atlas) => this.loadImage(atlas.key, atlas.src));
+    const imageJobs = Object.values(imageAssets).map((asset) => this.loadImage(asset.key, asset.src));
+    await Promise.all([...atlasJobs, ...imageJobs]);
     await this.loadFont();
     this.ready = true;
   }

@@ -86,8 +86,8 @@ export class Pickup {
     const dx = player.x - this.x;
     const dy = player.y - this.y;
     const dist = Math.hypot(dx, dy) || 1;
-    if (dist < player.pickupRadius + 40) {
-      const strength = dist < player.pickupRadius ? 360 : 160;
+    if (dist < player.pickupRadius + 56) {
+      const strength = dist < player.pickupRadius ? 420 : 190;
       this.x += (dx / dist) * strength * delta;
       this.y += (dy / dist) * strength * delta;
     }
@@ -278,7 +278,7 @@ export class Player {
   }
 
   getXpTarget() {
-    return Math.floor(14 + Math.pow(this.level, 1.32) * 12);
+    return Math.floor(10 + Math.pow(this.level, 1.28) * 10);
   }
 
   addWeapon(weaponId) {

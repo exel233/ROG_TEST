@@ -5,14 +5,14 @@ export const balance = {
     metaState: "rift-outlast-meta-state"
   },
   player: {
-    baseXpMultiplier: 1.08,
-    openingShieldSeconds: 2.4
+    baseXpMultiplier: 1.14,
+    openingShieldSeconds: 3.2
   },
   spawn: {
-    baseInterval: 1.05,
+    baseInterval: 1.16,
     minInterval: 0.24,
-    growthPerSecond: 0.0027,
-    baseCap: 22,
+    growthPerSecond: 0.0024,
+    baseCap: 20,
     capRate: 0.72,
     eliteMarks: [75, 135, 195],
     bossTime: 225
@@ -26,7 +26,7 @@ export const balance = {
     bossBuffChance: 1
   },
   events: {
-    firstSupplyTime: 52,
+    firstSupplyTime: 42,
     supplyInterval: 68
   },
   buffs: {

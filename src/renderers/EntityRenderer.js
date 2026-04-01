@@ -4,8 +4,11 @@ import {
   decorTiles,
   enemySprites,
   floorTiles,
+  floorOverlayTiles,
+  propTiles,
   pickupSprites,
   pixelScale,
+  weaponVisuals,
   worldPalette
 } from "../data/visuals.js";
 import { clamp, randomRange, TAU } from "../utils/math.js";
@@ -36,15 +39,31 @@ export class EntityRenderer {
         const x = gx * tileSize - cameraX;
         const y = gy * tileSize - cameraY;
         this.drawAtlasFrame(ctx, floorTile.atlas, floorTile.x, floorTile.y, x, y, tileSize);
+        if ((gx + gy) % 6 === 0) {
+          const overlay = floorOverlayTiles[Math.abs((gx * 5 + gy * 11) % floorOverlayTiles.length)];
+          this.drawAtlasFrame(ctx, overlay.atlas, overlay.x, overlay.y, x, y, tileSize, 0.15);
+        }
         if ((gx + gy) % 17 === 0) {
           const decor = decorTiles[Math.abs((gx * 3 + gy * 5) % decorTiles.length)];
           this.drawAtlasFrame(ctx, decor.atlas, decor.x, decor.y, x, y, tileSize);
+        }
+        if ((gx * 5 + gy * 3) % 29 === 0) {
+          const prop = propTiles[Math.abs((gx * 11 + gy * 17) % propTiles.length)];
+          this.drawAtlasFrame(ctx, prop.atlas, prop.x, prop.y, x, y, tileSize);
         }
       }
     }
 
     ctx.fillStyle = worldPalette.floorTint;
     ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = worldPalette.floorGlow;
+    for (let index = 0; index < 5; index += 1) {
+      const px = ((index * 193 + elapsed * 14) % (width + 220)) - 110;
+      const py = (index * 137) % height;
+      ctx.beginPath();
+      ctx.arc(px, py, 68 + index * 14, 0, TAU);
+      ctx.fill();
+    }
 
     const pulse = 0.5 + Math.sin(elapsed * 0.9) * 0.5;
     ctx.fillStyle = `rgba(91, 221, 189, ${0.06 + pulse * 0.04})`;
@@ -73,14 +92,36 @@ export class EntityRenderer {
     ctx.fill();
   }
 
+  drawTintedImage(ctx, key, x, y, size, color = "#ffffff", alpha = 1, rotation = 0, blend = "source-over") {
+    const image = this.assets.getImage(key);
+    if (!image) {
+      return false;
+    }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = blend;
+    ctx.translate(Math.round(x), Math.round(y));
+    ctx.rotate(rotation);
+    ctx.drawImage(image, -size / 2, -size / 2, size, size);
+    ctx.globalCompositeOperation = "source-atop";
+    ctx.fillStyle = color;
+    ctx.fillRect(-size / 2, -size / 2, size, size);
+    ctx.restore();
+    return true;
+  }
+
   drawPlayer(ctx, player, cameraX, cameraY, elapsed) {
     const sprite = characterSprites[player.character.id];
-    const frame = sprite.idle[Math.floor(elapsed * 5) % sprite.idle.length];
+    const moving = Math.abs(player.x - (player.lastRenderX || player.x)) + Math.abs(player.y - (player.lastRenderY || player.y)) > 0.2;
+    const animation = moving ? sprite.move || sprite.idle : sprite.idle;
+    const frame = animation[Math.floor(elapsed * (moving ? 10 : 5)) % animation.length];
     const size = 16 * pixelScale;
     const drawX = player.x - cameraX - size / 2;
     const drawY = player.y - cameraY - size / 2 - 8 + Math.sin(elapsed * 7) * 1.5;
     this.drawShadow(ctx, player.x - cameraX, player.y - cameraY + 12, 14, 7);
     this.drawAtlasFrame(ctx, sprite.atlas, frame.x, frame.y, drawX, drawY, size);
+    player.lastRenderX = player.x;
+    player.lastRenderY = player.y;
   }
 
   drawEnemy(ctx, enemy, cameraX, cameraY, elapsed) {
@@ -137,27 +178,39 @@ export class EntityRenderer {
   drawProjectile(ctx, projectile, cameraX, cameraY, elapsed) {
     const x = projectile.x - cameraX;
     const y = projectile.y - cameraY;
+    const visual = weaponVisuals[projectile.weaponId] || (projectile.team === "enemy" ? weaponVisuals.enemy : null);
 
     if (projectile.type === "zone") {
+      const size = projectile.radius * 2.15;
+      if (visual?.zoneFx) {
+        this.drawTintedImage(ctx, visual.zoneFx, x, y, size, visual.color, 0.34, elapsed * 0.3, "screen");
+      }
       ctx.save();
       ctx.beginPath();
       ctx.arc(x, y, projectile.radius, 0, TAU);
-      ctx.fillStyle = projectile.weaponId === "frostField" ? "rgba(110, 221, 255, 0.13)" : "rgba(225, 139, 255, 0.12)";
+      ctx.fillStyle = projectile.weaponId === "frostField" ? "rgba(110, 221, 255, 0.16)" : "rgba(225, 139, 255, 0.12)";
       ctx.fill();
-      ctx.strokeStyle = projectile.weaponId === "frostField" ? "rgba(165, 244, 255, 0.55)" : "rgba(236, 163, 255, 0.55)";
+      ctx.strokeStyle = visual?.zoneOutline || (projectile.weaponId === "frostField" ? "rgba(165, 244, 255, 0.55)" : "rgba(236, 163, 255, 0.55)");
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.restore();
       return;
     }
 
-    const trailColor = projectile.team === "enemy" ? "rgba(130, 232, 157, 0.22)" : "rgba(255,255,255,0.2)";
+    const trailColor = visual?.trailColor || (projectile.team === "enemy" ? "rgba(130, 232, 157, 0.22)" : "rgba(255,255,255,0.2)");
     ctx.strokeStyle = trailColor;
-    ctx.lineWidth = projectile.radius;
+    ctx.lineWidth = Math.max(2, projectile.radius * 0.8);
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x - (projectile.vx || 0) * 0.03, y - (projectile.vy || 0) * 0.03);
+    const trailMul = (visual?.trailLength || 12) / 100;
+    ctx.lineTo(x - (projectile.vx || 0) * trailMul, y - (projectile.vy || 0) * trailMul);
     ctx.stroke();
+
+    if (visual?.projectileFx) {
+      const size = Math.max(16, projectile.radius * 8 * (visual.projectileScale || 0.35));
+      this.drawTintedImage(ctx, visual.projectileFx, x, y, size, visual.color || projectile.color || "#ffffff", 0.92, projectile.angle || elapsed * 4, "screen");
+      return;
+    }
 
     ctx.save();
     ctx.translate(x, y);
@@ -171,6 +224,19 @@ export class EntityRenderer {
   drawOrbital(ctx, weapon, stats, angle, x, y, cameraX, cameraY) {
     const size = stats.size * 1.9;
     this.drawShadow(ctx, x - cameraX, y - cameraY + 7, size * 0.34, size * 0.14);
+    const visual = weaponVisuals[weapon.id];
+    if (visual?.orbitalSprite) {
+      this.drawAtlasFrame(
+        ctx,
+        visual.orbitalSprite.atlas,
+        visual.orbitalSprite.x,
+        visual.orbitalSprite.y,
+        x - cameraX - size / 2,
+        y - cameraY - size / 2,
+        size
+      );
+      return;
+    }
     ctx.save();
     ctx.translate(x - cameraX, y - cameraY);
     ctx.rotate(angle + Math.PI / 4);
@@ -199,6 +265,23 @@ export class EntityRenderer {
       ctx.fillRect(Math.round(particle.x - cameraX), Math.round(particle.y - cameraY), particle.size, particle.size);
     }
     ctx.globalAlpha = 1;
+  }
+
+  drawEffects(ctx, effects, cameraX, cameraY) {
+    for (const effect of effects) {
+      const alpha = Math.max(0, effect.life / effect.maxLife);
+      this.drawTintedImage(
+        ctx,
+        effect.key,
+        effect.x - cameraX,
+        effect.y - cameraY,
+        effect.size * effect.scale,
+        effect.color,
+        alpha,
+        effect.rotation,
+        effect.blend
+      );
+    }
   }
 
   drawFloatingTexts(ctx, texts, cameraX, cameraY) {

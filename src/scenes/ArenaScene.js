@@ -1,5 +1,6 @@
 import { balance } from "../data/balance.js";
 import { enemies, timedBuffPool, weapons } from "../data/config.js";
+import { weaponVisuals } from "../data/visuals.js";
 import { Enemy, Pickup, Player, Projectile } from "../entities/Entities.js";
 import { CollisionSystem, SpawnSystem, UpgradeSystem } from "../systems/Systems.js";
 import { angleTo, clamp, distance, formatTime, fromAngle, normalize, randomRange, TAU } from "../utils/math.js";
@@ -14,6 +15,7 @@ export class ArenaScene {
     this.enemies = [];
     this.projectiles = [];
     this.pickups = [];
+    this.effects = [];
     this.particles = [];
     this.floatingTexts = [];
     this.enemyIdCounter = 1;
@@ -120,6 +122,7 @@ export class ArenaScene {
     for (const pickup of this.pickups) {
       pickup.update(delta, this.player);
     }
+    this.updateEffects(delta);
     this.updateParticles(delta);
     this.updateTexts(delta);
 
@@ -247,6 +250,17 @@ export class ArenaScene {
     }
   }
 
+  updateEffects(delta) {
+    for (const effect of this.effects) {
+      effect.life -= delta;
+      effect.age += delta;
+      effect.rotation += (effect.rotationSpeed || 0) * delta;
+      effect.scale += (effect.growth || 0) * delta;
+      effect.x += (effect.vx || 0) * delta;
+      effect.y += (effect.vy || 0) * delta;
+    }
+  }
+
   updateParticles(delta) {
     for (const particle of this.particles) {
       particle.life -= delta;
@@ -300,12 +314,43 @@ export class ArenaScene {
     this.projectiles.push(new Projectile(config));
   }
 
+  spawnEffect(config) {
+    this.effects.push({
+      x: config.x,
+      y: config.y,
+      key: config.key,
+      color: config.color || "#ffffff",
+      size: config.size || 42,
+      scale: config.scale || 1,
+      growth: config.growth || 0,
+      rotation: config.rotation || 0,
+      rotationSpeed: config.rotationSpeed || 0,
+      vx: config.vx || 0,
+      vy: config.vy || 0,
+      life: config.life || 0.25,
+      maxLife: config.life || 0.25,
+      blend: config.blend || "screen"
+    });
+  }
+
   fireTargeted(weaponId, stats) {
     const angle = this.getAimAngle();
+    const visual = weaponVisuals[weaponId];
     const total = stats.count + this.player.extraProjectiles;
     for (let i = 0; i < total; i += 1) {
       const spread = (i - (total - 1) / 2) * 0.08;
       const velocity = fromAngle(angle + spread, stats.speed * this.player.projectileSpeedMultiplier);
+      if (visual?.muzzleFx) {
+        this.spawnEffect({
+          x: this.player.x + velocity.x * 0.02,
+          y: this.player.y + velocity.y * 0.02,
+          key: visual.muzzleFx,
+          color: visual.color,
+          size: 38,
+          life: 0.12,
+          rotation: angle + spread
+        });
+      }
       this.createProjectile({
         x: this.player.x,
         y: this.player.y,
@@ -324,10 +369,22 @@ export class ArenaScene {
 
   fireScatter(weaponId, stats) {
     const angle = this.getAimAngle();
+    const visual = weaponVisuals[weaponId];
     const total = stats.count + this.player.extraProjectiles;
     for (let i = 0; i < total; i += 1) {
       const offset = total === 1 ? 0 : (i / (total - 1) - 0.5) * stats.spread;
       const velocity = fromAngle(angle + offset, stats.speed * this.player.projectileSpeedMultiplier);
+      if (visual?.muzzleFx) {
+        this.spawnEffect({
+          x: this.player.x,
+          y: this.player.y,
+          key: visual.muzzleFx,
+          color: visual.color,
+          size: 30,
+          life: 0.1,
+          rotation: angle + offset
+        });
+      }
       this.createProjectile({
         x: this.player.x,
         y: this.player.y,
@@ -345,6 +402,18 @@ export class ArenaScene {
   }
 
   fireNova(weaponId, stats) {
+    const visual = weaponVisuals[weaponId];
+    if (visual?.zoneFx) {
+      this.spawnEffect({
+        x: this.player.x,
+        y: this.player.y,
+        key: visual.zoneFx,
+        color: visual.color,
+        size: stats.radius * 1.5,
+        life: 0.22,
+        growth: 70
+      });
+    }
     this.createProjectile({
       type: "zone",
       x: this.player.x,
@@ -360,10 +429,22 @@ export class ArenaScene {
   }
 
   fireHoming(weaponId, stats) {
+    const visual = weaponVisuals[weaponId];
     const total = stats.count + this.player.extraProjectiles;
     for (let i = 0; i < total; i += 1) {
       const angle = this.getAimAngle() + (i - (total - 1) / 2) * 0.2;
       const velocity = fromAngle(angle, stats.speed * this.player.projectileSpeedMultiplier);
+      if (visual?.muzzleFx) {
+        this.spawnEffect({
+          x: this.player.x,
+          y: this.player.y,
+          key: visual.muzzleFx,
+          color: visual.color,
+          size: 34,
+          life: 0.14,
+          rotation: angle
+        });
+      }
       this.createProjectile({
         x: this.player.x,
         y: this.player.y,
@@ -384,10 +465,22 @@ export class ArenaScene {
 
   firePierce(weaponId, stats) {
     const angle = this.getAimAngle();
+    const visual = weaponVisuals[weaponId];
     const total = stats.count + this.player.extraProjectiles;
     for (let i = 0; i < total; i += 1) {
       const spread = (i - (total - 1) / 2) * 0.06;
       const velocity = fromAngle(angle + spread, stats.speed * this.player.projectileSpeedMultiplier);
+      if (visual?.muzzleFx) {
+        this.spawnEffect({
+          x: this.player.x,
+          y: this.player.y,
+          key: visual.muzzleFx,
+          color: visual.color,
+          size: 32,
+          life: 0.08,
+          rotation: angle + spread
+        });
+      }
       this.createProjectile({
         x: this.player.x,
         y: this.player.y,
@@ -407,9 +500,21 @@ export class ArenaScene {
 
   fireBoomerang(weaponId, stats) {
     const angle = this.getAimAngle();
+    const visual = weaponVisuals[weaponId];
     for (let i = 0; i < stats.count; i += 1) {
       const spread = (i - (stats.count - 1) / 2) * 0.24;
       const velocity = fromAngle(angle + spread, stats.speed * this.player.projectileSpeedMultiplier);
+      if (visual?.muzzleFx) {
+        this.spawnEffect({
+          x: this.player.x,
+          y: this.player.y,
+          key: visual.muzzleFx,
+          color: visual.color,
+          size: 42,
+          life: 0.12,
+          rotation: angle + spread
+        });
+      }
       this.createProjectile({
         x: this.player.x,
         y: this.player.y,
@@ -438,6 +543,15 @@ export class ArenaScene {
 
   spawnEnemyProjectile(enemy, nx, ny) {
     const speed = enemy.id === "boss" ? 250 : 200;
+    const visual = enemy.id === "boss" ? weaponVisuals.boss : weaponVisuals.enemy;
+    this.spawnEffect({
+      x: enemy.x,
+      y: enemy.y,
+      key: visual.projectileFx,
+      color: visual.color,
+      size: enemy.id === "boss" ? 42 : 30,
+      life: 0.12
+    });
     this.createProjectile({
       x: enemy.x,
       y: enemy.y,
@@ -447,7 +561,8 @@ export class ArenaScene {
       life: 3,
       damage: enemy.damage,
       team: "enemy",
-      color: enemy.color
+      color: enemy.color,
+      weaponId: enemy.id === "boss" ? "boss" : "enemy"
     });
   }
 
@@ -493,7 +608,20 @@ export class ArenaScene {
   damageEnemy(enemy, damage, weaponId, source = null) {
     enemy.health -= damage;
     enemy.takeHit();
-    this.addBurst(enemy.x, enemy.y, source?.weaponId === "frostField" ? "#92dfff" : "#ffcf7d", enemy.id === "boss" ? 10 : 6);
+    const visual = weaponVisuals[weaponId] || weaponVisuals[source?.weaponId] || weaponVisuals.emberLance;
+    this.addBurst(enemy.x, enemy.y, source?.weaponId === "frostField" ? "#92dfff" : visual.color || "#ffcf7d", enemy.id === "boss" ? 10 : 6);
+    if (visual?.hitFx) {
+      this.spawnEffect({
+        x: enemy.x,
+        y: enemy.y,
+        key: visual.hitFx,
+        color: visual.color,
+        size: enemy.id === "boss" ? 58 : 34,
+        life: 0.16,
+        rotation: randomRange(0, TAU),
+        growth: 30
+      });
+    }
     this.pushFloatingText(`${Math.max(1, Math.round(damage))}`, enemy.x, enemy.y - enemy.radius - 8, "#fff4c2", 0.4);
 
     if (source?.type === "zone" && source.knockback) {
@@ -515,6 +643,15 @@ export class ArenaScene {
       this.cameraShake = Math.max(this.cameraShake, enemy.id === "boss" ? 18 : 6);
       this.pickups.push(new Pickup({ x: enemy.x, y: enemy.y, value: enemy.xp, kind: "xp", radius: 10 }));
       this.addBurst(enemy.x, enemy.y, "#ffcf7d", enemy.id === "boss" ? 18 : 8, 80);
+      this.spawnEffect({
+        x: enemy.x,
+        y: enemy.y,
+        key: enemy.id === "boss" ? "fxFlare1" : "fxSmoke3",
+        color: enemy.id === "boss" ? "#ffd38e" : enemy.color,
+        size: enemy.id === "boss" ? 96 : 46,
+        life: enemy.id === "boss" ? 0.45 : 0.24,
+        growth: enemy.id === "boss" ? 55 : 20
+      });
       if (enemy.id === "splitter") {
         for (let i = 0; i < enemy.baseConfig.splitCount; i += 1) {
           const angle = (i / enemy.baseConfig.splitCount) * TAU;
@@ -572,6 +709,7 @@ export class ArenaScene {
       (projectile) => projectile.alive && Math.abs(projectile.x - this.player.x) < 1500 && Math.abs(projectile.y - this.player.y) < 1100
     );
     this.pickups = this.pickups.filter((pickup) => pickup.alive);
+    this.effects = this.effects.filter((effect) => effect.life > 0);
     this.particles = this.particles.filter((particle) => particle.life > 0);
     this.floatingTexts = this.floatingTexts.filter((text) => text.life > 0);
   }
@@ -616,6 +754,7 @@ export class ArenaScene {
     }
 
     renderer.drawPlayer(ctx, this.player, cameraX, cameraY, this.elapsed);
+    renderer.drawEffects(ctx, this.effects, cameraX, cameraY);
     renderer.drawParticles(ctx, this.particles, cameraX, cameraY);
     renderer.drawFloatingTexts(ctx, this.floatingTexts, cameraX, cameraY);
 
