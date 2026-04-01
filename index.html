@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rift Outlast</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas" width="1280" height="720"></canvas>
+      <div id="hud" class="panel top-left">
+        <div class="hud-row">
+          <span>生命</span>
+          <div class="bar"><div id="health-fill" class="bar-fill health"></div></div>
+          <span id="health-text">0 / 0</span>
+        </div>
+        <div class="hud-row">
+          <span>经验</span>
+          <div class="bar"><div id="xp-fill" class="bar-fill xp"></div></div>
+          <span id="xp-text">Lv.1</span>
+        </div>
+        <div class="hud-meta">
+          <div>等级 <strong id="level-text">1</strong></div>
+          <div>时间 <strong id="time-text">00:00</strong></div>
+          <div>击败 <strong id="kills-text">0</strong></div>
+          <div>最高分 <strong id="record-text">0</strong></div>
+        </div>
+      </div>
+      <div id="build-panel" class="panel top-right">
+        <h3>当前构筑</h3>
+        <div class="build-columns">
+          <div><h4>武器</h4><ul id="weapon-list"></ul></div>
+          <div><h4>增益</h4><ul id="passive-list"></ul></div>
+        </div>
+      </div>
+      <div id="status-line" class="panel bottom-center">
+        <span>WASD / 方向键移动</span>
+        <span>升级时点击卡牌选择强化</span>
+        <span>Esc 暂停</span>
+      </div>
+      <div id="overlay-root"></div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
